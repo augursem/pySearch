@@ -8,21 +8,20 @@ import re
 import shlex
 
 #TODO list:
-# 1 - number of context lines isn't implemented yet
-# 2 - Need a default max number of hits in a given file. Display first N (5?) and then ' .... + <N> more matches'
-# 3 - if only want files with no extension, that would be tricky. Think best to just have input like -ext xxxx,,xxxx. or keyword __NONE__?
-# 4 - Move helper functions into pySearch class
-# 5 - Argparser help shouldn't print the name of the calling script - needs to always be pySearch
-# 6 - Init with string for arguments doesn't work
-# 7 - type parameter instead -df
-# 8 - instead of passing around 'args', define self variables for all options
-# 9 - implement contents for directory search
+# * - number of context lines isn't implemented yet
+# * - Handle files with no extension - keyword __NONE__?
+# * - Argparser help shouldn't print the name of the calling script - needs to always be pySearch
+# * - Init with string for arguments doesn't work
+# * - type parameter instead -df
+# * - instead of passing around 'args', define self variables for all options
+# * - implement contents for directory search
 
 #------------------------------------------
 # ARGUMENTS
 #    source (positional) - Source directory from which to search
 #    -name      a string the name of the file must contain
 #    -contents  a string that should appear in the contents of the file. If searching for directories, contents matches filenames in the directory
+#    -maxCont   a number - maximum number of content matches to return for a given file. Default is 5. Set to 0 for no limit.
 #    -after     the earliest time stamp to return files for, e.g. 1/01/2022:9:1
 #    -before    the latest time stamp to return files for, e.g. 05/11/2022:16:05
 #    -within    sets the timestamp min (after arg) relative to current time, e.g. -within 5min, -within 1.3hr, -within 45sec -within 5day
@@ -39,20 +38,33 @@ import shlex
 class pySearch:
 
     def __init__(self, argString=None):
+        self.defaultContextLines = 2
+        self.maxContentMatches = 5
         self.createtArgParser()
         if argString == None:
             self.args = self.parser.parse_args()
         else:
             self.args = parser.parse_args(shlex.split(argString))
-
+        
+        #display file access errors?
+        self.quietMode = self.args.q
+        
         #results object init
         self.results = searchResults()
 
+        #Max content lines
+        if self.args.maxCont != None:
+            if re.compile('\d+').match(self.args.maxCont) == None:
+                sys.exit('Invalid value for maxCont. maximum number of content matches should be a non-negative integer')
+            self.maxContentMatches = int(self.args.maxCont)
+        
         #Check that context lines makes sense
         if self.args.context != None:
             if re.compile('\d+').match(self.args.context) == None:
                 sys.exit('Invalid value for context. Number of context lines should be an integer less than 11')
-            self.results.setContextLines(float(self.args.context))
+            self.results.setNumContextLines(float(self.args.context))
+        else:
+            self.results.setNumContextLines(float(self.defaultContextLines))
 
         # Are we looking for files, directories, both?
         self.filesFlag = self.args.f or (not self.args.f and not self.args.d) #if neither -f or -d is specified, searchf or files
@@ -72,7 +84,6 @@ class pySearch:
         if self.searchContents != None:
             if not self.args.c:
                 self.searchContents = self.searchContents.lower()
-            contextLines = 1
 
         #Catch some incompatible choices:
         if self.args.r and self.args.e:
@@ -87,14 +98,13 @@ class pySearch:
     def __call__(self):
         #Actual search happens here
         for (dirpath, dirnames, filenames) in walk(self.source):
-            fullDirPath = os.path.abspath(dirpath)
             if (self.filesFlag and len(filenames) > 0):
                 for filename in filenames:
-                    self.checkFile(fullDirPath, filename)
+                    self.checkFile(dirpath, filename)
                     
             if (self.directoriesFlag and len(dirnames) > 0):
                 for dirname in dirnames:
-                    self.checkDirectory(fullDirPath, dirname, self.args)
+                    self.checkDirectory(dirpath, dirname, self.args)
         self.results.display(self.filesFlag,self.directoriesFlag)
 
     def createtArgParser(self):
@@ -102,6 +112,7 @@ class pySearch:
         self.parser.add_argument('source', help='Source directory from which to search')
         self.parser.add_argument('-name', help='Specify a string the name of the file must contain', required=False)
         self.parser.add_argument('-contents', help='Specify a string that should appear in the contents of the file. If searching for directories, contents matches filenames in the directory (i.e. only return directories that contain files with names matching contents)', required=False)
+        self.parser.add_argument('-maxCont', help='A number - maximum number of content matches to return for a given file. Default is 5. Set to 0 for no limit.', required=False)
         self.parser.add_argument('-after', help='Specify the earliest time stamp to return files for, e.g. 1/01/2022:9:1')
         self.parser.add_argument('-before', help='Specify the latest time stamp to return files for, e.g. 05/11/2022:16:05')
         self.parser.add_argument('-within', help='Set timestamp min relative to current time, e.g. -within 5min, -within 1.3hr, -within 45sec -within 5day')
@@ -116,15 +127,9 @@ class pySearch:
         self.parser.add_argument('-r', help='Regex search', action='store_true')
 
     # Determine if a file meets the criteria of the search 
-    def checkFile(self, fullDirPath, name):
-        #Get timestamp
-        ts = self.getTimeStamp(fullDirPath, name)
-        if ts == None:
-            return False
-        timestampString = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
-        
-        #Initialize the foundFile object to (possibly) return
-        thisFile = foundFile(name,fullDirPath,timestampString)
+    def checkFile(self, path, name):       
+        #Initialize the foundFileObject to (possibly) return
+        thisFile = foundFileObject("file",name,path,self)
         
         #Check the file extensions
         if len(self.ext) > 0:
@@ -139,7 +144,7 @@ class pySearch:
             return False
 
         #Check if timestamp meets criteria
-        if not self.checkTimeStamp(ts):
+        if not self.checkTimeStamp(thisFile.ts):
             return False
 
         #Check file contents
@@ -151,22 +156,16 @@ class pySearch:
         return True
 
     # Determine if a directory meets the criteria of the search 
-    def checkDirectory(self, fullDirPath, name):
-        #Get timestamp
-        ts = self.getTimeStamp(fullDirPath, name)
-        if ts == None:
-            return False
-        timestampString = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
-        
-        #Initialize the foundFile object to (possibly) return
-        thisDir = foundDirectory(name,fullDirPath,timestampString)
+    def checkDirectory(self, path, name):
+        #Initialize the foundFileObject to (possibly) return
+        thisDir = foundFileObject("directory",name,path,self)
         
         #First do a name check (returns true if no name argument was passed in)
         if not self.checkName(name):
             return False
 
         #Check if timestamp meets criteria
-        if not self.checkTimeStamp(ts):
+        if not self.checkTimeStamp(thisDir.ts):
             return False
 
         self.results.addDir(thisDir)
@@ -203,28 +202,30 @@ class pySearch:
     #Check file contents for match.
     def checkFileContents(self, fileObj, resultsObj):
         match = True
-        upperLines = []
-        lowerLines = []
         if self.searchContents != None:
             match = False
             try:
-                searchfile = open(os.path.join(fileObj.path,fileObj.name), "r")
+                searchfile = open(fileObj.fullQualPath, "r")
             except OSError as error:
-                if not self.args.q:
+                if not self.quietMode:
                     print(error)
                 return False
             try:
+                numMathes = 0
                 for lineNo,line in enumerate(searchfile,1):
                     #print("Line is: \n   {}\nSearch string is:\n{}".format(line,self.searchContents))
-                    if resultsObj.getNumContextLines() > 0:
-                        # Not implemented yet
-                        foo='bar'
-                    if self.checkFileContentsLine(line,self.searchContents,self.args):
+                    # Not implemented yet
+                    # if resultsObj.getNumContextLines() > 0:
+                    if self.checkFileContentsLine(line):
                         match = True
+                        numMathes += 1
                         fileObj.addContentMatch(lineNo,[line])
+                        if self.maxContentMatches > 0 and numMathes >= self.maxContentMatches:
+                            fileObj.addNote("possibly more content matches - stopped after {} matches".format(numMathes))
+                            break
             except:
-                if not self.args.q:
-                    print("Unable to read contents of {}".format(filePath))
+                if not self.quietMode:
+                    print("Unable to read contents of {}".format(fileObj.fullQualPath))
                 match = False
             finally:
                 searchfile.close()
@@ -242,18 +243,6 @@ class pySearch:
             if regExp.search(line) != None:
                 print(line)
                 return True
-
-    def getTimeStamp(self, fullPath, name):
-        try:
-            if platform.system().lower() == 'windows':
-                #\\?prefix to an absolute path in Windows to handle extended path lengths
-                fullPath = '\\\\?\\'+fullPath
-            ts = os.path.getmtime(os.path.join(fullPath,name))
-            return ts
-        except OSError as error:
-            if not self.args.q:
-                print(error)
-            return None
 
     def processTimeStampArgs(self):
         self.timeMinValue = None
@@ -324,35 +313,71 @@ class pySearch:
         if re.compile('\d\d?/\d\d?/\d\d\d\d:\d\d?:\d\d?').match(getattr(self.args,argName)) == None:
             sys.exit("Invalid value for '{}': {}\n{}".format(argName,getattr(self.args,argName),self.parser.format_help()))
 
-class foundFile:
-    def __init__(self,name,path,ts):
+class foundFileObject:
+    def __init__(self,type,name,path,searchObject):
         self.name = name
         self.path = path
-        self.ts = ts
-        self.lineMatchNums = []
-        self.contextLines = {}
-        self.contextLines['numContextLines'] = 0
-        self.ext = ""
-        ind = self.name.rfind(".")
-        if ind < len(self.name) -1:
-            self.ext = self.name[ind+1:]
+        self.quietMode = searchObject.quietMode
+        self.notes = []
+        
+        #Get the full file path (e.g. replace ~ with /usr/myName)
+        self.fullPath = os.path.abspath(path)
+        #\\?prefix to an absolute path in Windows to handle extended path lengths
+        if platform.system().lower() == 'windows':
+            self.fullPathExtended = '\\\\?\\'+self.fullPath
+        else:
+            self.fullPathExtended = self.fullPath
+        #Fully qualified path (includes name)
+        self.fullQualPath = os.path.join(self.fullPathExtended,self.name)
+            
+        #file object type (directory or file)
+        self.type = type
+        self.valid_types=["file","directory"]
+        if not self.type in self.valid_types:
+            sys.exit("The foundFileObject type \"{}\" is not valid. Valid types are: \"{}\"".format(self.type,self.valid_types))
+         
+        #get the timestamp for this file
+        self.ts = self.getTimeStamp()
+        if self.ts == None:
+            return None
+        self.timestampString = datetime.datetime.fromtimestamp(self.ts).strftime('%Y-%m-%d %H:%M:%S')
+        
+        if self.type == "file":
+            #get the file extension
+            self.ext = ""
+            ind = self.name.rfind(".")
+            if ind < len(self.name) -1:
+                self.ext = self.name[ind+1:]
+            
+            #Initialize context lines
+            self.lineMatchNums = []
+            self.contextLines = {}
+            self.contextLines['numContextLines'] = searchObject.results.getNumContextLines()
+            
+
+    def getTimeStamp(self):
+        try:
+            ts = os.path.getmtime(self.fullQualPath)
+            return ts
+        except OSError as error:
+            if not self.quietMode:
+                print(error)
+            return None
 
     def addContentMatch(self,lineNo,contextLines):
         self.lineMatchNums.append(lineNo)
         self.contextLines[lineNo] = contextLines
     
+    def addNote(self, theNote):
+        self.notes.append(theNote)
+    
     def display(self):
-        print("{}\t{}".format(os.path.join(self.path,self.name),self.ts))
-
-#Object for each matched directory
-class foundDirectory:
-    def __init__(self,name,path,ts):
-        self.name = name
-        self.path = path
-        self.ts = ts
-
-    def display(self):
-        print("{}\t{}".format(os.path.join(self.path,self.name),self.ts))
+        print("{}\t{}".format(os.path.join(self.fullPath,self.name),self.timestampString))
+        if self.type == "file":
+            for lineNo in self.lineMatchNums:
+                print("   {}: {}".format(lineNo,self.contextLines[lineNo]))
+        for note in self.notes:
+            print("   -"+note)
 
 #Collection of all search results
 class searchResults:
@@ -371,13 +396,9 @@ class searchResults:
     def display(self,filesFlag,dirsFlag):
         if filesFlag:
             print("Matched {} file(s)".format(len(self.fileMatches)))
-            for file in self.fileMatches:
-                for lineNo in file.lineMatchNums:
-                    print("   {}: {}".format(lineNo,file.contextLines[lineNo]))
+
         if dirsFlag:
             print("{} directory matches".format(len(self.dirMatches)))
-
-
 
 
 def main():
