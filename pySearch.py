@@ -133,10 +133,14 @@ class pySearch:
         
         #Check the file extensions
         if len(self.ext) > 0:
-            if not thisFile.ext in self.ext:
+            if not hasattr(thisFile, 'ext'):
+               print("WARNING: no extension found for file '{}' in '{}'".format(name,path))
+            elif not thisFile.ext in self.ext:
                 return False
         elif len(self.Xext) > 0:
-            if thisFile.ext in self.Xext:
+            if not hasattr(thisFile, 'ext'):
+               print("WARNING: no extension found for file '{}' in '{}'".format(name,path))
+            elif thisFile.ext in self.Xext:
                 return False
         
         #First do a name check (returns true if no name argument was passed in)
