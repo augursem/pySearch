@@ -15,6 +15,8 @@ import shlex
 # * - type parameter instead -df
 # * - instead of passing around 'args', define self variables for all options
 # * - implement contents for directory search
+# * - add --shallow option to not search in subdirectories
+# * - expand README examples and go into describe each option in its own section
 
 #------------------------------------------
 # ARGUMENTS
@@ -107,6 +109,7 @@ class pySearch:
                     self.checkDirectory(dirpath, dirname, self.args)
         self.results.display(self.filesFlag,self.directoriesFlag)
 
+    # Creates the arument parser object used in __init__ to read in command line arguments
     def createtArgParser(self):
         self.parser = argparse.ArgumentParser(description='Search for files and/or folders')
         self.parser.add_argument('source', help='Source directory from which to search')
