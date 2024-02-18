@@ -29,7 +29,7 @@ import shlex
 #    -within    sets the timestamp min (after arg) relative to current time, e.g. -within 5min, -within 1.3hr, -within 45sec -within 5day
 #    -ext       Comma-separated list of file extensions to include (all others ignored). Can not be used with Xext
 #    -Xext      Comma-separated list of file extensions to ignore. Can not be used with ext
-#    -context   number of context lines to display when searching contents (files only)
+#    -context   number of context lines to display when searching contents (files only) (not implemented yet)
 #    -c         Perform a case-sensitive search
 #    -e         Exact name match - matches full file/directory name. Matching is not case sensitive without specifying -c also
 #    -f         Search for files (defaults to true)
@@ -106,7 +106,7 @@ class pySearch:
                     
             if (self.directoriesFlag and len(dirnames) > 0):
                 for dirname in dirnames:
-                    self.checkDirectory(dirpath, dirname, self.args)
+                    self.checkDirectory(dirpath, dirname)
         self.results.display(self.filesFlag,self.directoriesFlag)
 
     # Creates the arument parser object used in __init__ to read in command line arguments
@@ -136,10 +136,14 @@ class pySearch:
         
         #Check the file extensions
         if len(self.ext) > 0:
-            if not thisFile.ext in self.ext:
+            if not hasattr(thisFile, 'ext'):
+               print("WARNING: no extension found for file '{}' in '{}'".format(name,path))
+            elif not thisFile.ext in self.ext:
                 return False
         elif len(self.Xext) > 0:
-            if thisFile.ext in self.Xext:
+            if not hasattr(thisFile, 'ext'):
+               print("WARNING: no extension found for file '{}' in '{}'".format(name,path))
+            elif thisFile.ext in self.Xext:
                 return False
         
         #First do a name check (returns true if no name argument was passed in)
