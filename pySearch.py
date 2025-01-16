@@ -7,17 +7,6 @@ from os import walk
 import re
 import shlex
 
-#TODO list:
-# * - number of context lines isn't implemented yet
-# * - Handle files with no extension - keyword __NONE__?
-# * - Argparser help shouldn't print the name of the calling script - needs to always be pySearch
-# * - Init with string for arguments doesn't work
-# * - type parameter instead -df
-# * - instead of passing around 'args', define self variables for all options
-# * - implement contents for directory search
-# * - add --shallow option to not search in subdirectories
-# * - expand README examples and go into describe each option in its own section
-
 #------------------------------------------
 # ARGUMENTS
 #    source (positional) - Source directory from which to search
@@ -31,11 +20,11 @@ import shlex
 #    -Xext      Comma-separated list of file extensions to ignore. Can not be used with ext
 #    -context   number of context lines to display when searching contents (files only) (not implemented yet)
 #    -c         Perform a case-sensitive search
-#    -e         Exact name match - matches full file/directory name. Matching is not case sensitive without specifying -c also
+#    -e         Exact name match - matches full file/directory name. Matching is not case sensitive without specifying -c also.  Not compatible with the -r (regex) flag
 #    -f         Search for files (defaults to true)
 #    -d         Search for directories (defaults to false)
 #    -q         Quiet mode (don't show file access errors, etc)
-#    -r         Regex search
+#    -r         Regex search. Not compatible with the -e (exact match) flag
 
 class pySearch:
 
